@@ -1,0 +1,128 @@
+# Сетевые политики для четырёх сервисов в одном namespace.
+#
+# Развернуть сервисы:
+#   kubectl run front-end-app --image=nginx --labels role=front-end --expose --port 80
+#   kubectl run back-end-api-app --image=nginx --labels role=back-end-api --expose --port 80
+#   kubectl run admin-front-end-app --image=nginx --labels role=admin-front-end --expose --port 80
+#   kubectl run admin-back-end-api-app --image=nginx --labels role=admin-back-end-api --expose --port 80
+#   kubectl apply -f non-admin-api-allow.yaml
+#
+# Проверить (тестовый под получает метку той роли, от имени которой идёт запрос):
+#   kubectl run test-$RANDOM --rm -i -t --image=alpine --labels role=front-end -- sh
+#   / # wget -qO- --timeout=2 http://back-end-api-app          отвечает nginx
+#   / # wget -qO- --timeout=2 http://admin-back-end-api-app    таймаут
+# То же с role=admin-front-end: admin-back-end-api-app отвечает, back-end-api-app нет.
+# Под без метки role не достучится ни до одного из сервисов.
+# Политики работают только с CNI, который их поддерживает (в minikube: --cni=calico).
+
+# Для подов с этими ролями по умолчанию закрыт весь входящий и исходящий трафик
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+spec:
+  podSelector:
+    matchExpressions:
+    - key: role
+      operator: In
+      values: [front-end, back-end-api, admin-front-end, admin-back-end-api]
+  policyTypes:
+  - Ingress
+  - Egress
+---
+# Без DNS имена сервисов не резолвятся
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+spec:
+  podSelector:
+    matchExpressions:
+    - key: role
+      operator: In
+      values: [front-end, back-end-api, admin-front-end, admin-back-end-api]
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+---
+# front-end <-> back-end-api
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: non-admin-api-allow
+spec:
+  podSelector:
+    matchExpressions:
+    - key: role
+      operator: In
+      values: [front-end, back-end-api]
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - podSelector:
+        matchExpressions:
+        - key: role
+          operator: In
+          values: [front-end, back-end-api]
+    ports:
+    - protocol: TCP
+      port: 80
+  egress:
+  - to:
+    - podSelector:
+        matchExpressions:
+        - key: role
+          operator: In
+          values: [front-end, back-end-api]
+    ports:
+    - protocol: TCP
+      port: 80
+---
+# admin-front-end <-> admin-back-end-api
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: admin-api-allow
+spec:
+  podSelector:
+    matchExpressions:
+    - key: role
+      operator: In
+      values: [admin-front-end, admin-back-end-api]
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - podSelector:
+        matchExpressions:
+        - key: role
+          operator: In
+          values: [admin-front-end, admin-back-end-api]
+    ports:
+    - protocol: TCP
+      port: 80
+  egress:
+  - to:
+    - podSelector:
+        matchExpressions:
+        - key: role
+          operator: In
+          values: [admin-front-end, admin-back-end-api]
+    ports:
+    - protocol: TCP
+      port: 80

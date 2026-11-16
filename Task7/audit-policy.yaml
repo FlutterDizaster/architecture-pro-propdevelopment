@@ -1,0 +1,21 @@
+apiVersion: audit.k8s.io/v1
+kind: Policy
+omitStages:
+  - RequestReceived
+rules:
+  # запросы на поды в audit-zone пишу целиком: по ним видно, что прислали и почему admission отказал
+  - level: RequestResponse
+    namespaces: ["audit-zone"]
+    verbs: ["create", "update", "patch", "delete"]
+    resources:
+      - group: ""
+        resources: ["pods"]
+  # изменения самих политик Gatekeeper и меток namespace
+  - level: RequestResponse
+    verbs: ["create", "update", "patch", "delete"]
+    resources:
+      - group: ""
+        resources: ["namespaces"]
+      - group: "templates.gatekeeper.sh"
+      - group: "constraints.gatekeeper.sh"
+  - level: Metadata

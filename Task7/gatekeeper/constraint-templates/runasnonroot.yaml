@@ -1,0 +1,40 @@
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8srequirerunasnonroot
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sRequireRunAsNonRoot
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8srequirerunasnonroot
+
+        violation[{"msg": msg}] {
+          c := containers[_]
+          not non_root(c)
+          msg := sprintf("у контейнера %v не задан runAsNonRoot: true", [c.name])
+        }
+
+        violation[{"msg": msg}] {
+          c := containers[_]
+          c.securityContext.runAsUser == 0
+          msg := sprintf("контейнер %v запускается с runAsUser: 0", [c.name])
+        }
+
+        violation[{"msg": msg}] {
+          input.review.object.spec.securityContext.runAsUser == 0
+          msg := "под запускается с runAsUser: 0"
+        }
+
+        # значение в контейнере перекрывает значение пода
+        non_root(c) { c.securityContext.runAsNonRoot == true }
+        non_root(c) {
+          object.get(c, ["securityContext", "runAsNonRoot"], null) == null
+          input.review.object.spec.securityContext.runAsNonRoot == true
+        }
+
+        containers[c] { c := input.review.object.spec.containers[_] }
+        containers[c] { c := input.review.object.spec.initContainers[_] }
